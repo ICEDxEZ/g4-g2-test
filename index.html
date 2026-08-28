@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#07090d">
+  <meta name="description" content="Phone-first KuKirin G2, G2 Ultra and G4 BLE read, write and protocol capture lab for FFF0/FFF1/FFF2.">
+  <title>KuKirin BLE Read + Write Lab</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="https://beacio.com/beacio.js"></script>
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <div class="background-grid" aria-hidden="true"></div>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-icon" aria-hidden="true">K</div>
+        <div>
+          <p class="eyebrow">KuKirin BLE protocol lab</p>
+          <h1>G2 / G2 Ultra / G4 Read + Write Lab</h1>
+        </div>
+      </div>
+      <div class="top-actions">
+        <span id="connectionPill" class="status-pill disconnected"><i></i><span id="connectionText">Disconnected</span></span>
+        <button id="disconnectBtn" class="button ghost" type="button" disabled>Disconnect</button>
+      </div>
+    </header>
+
+    <section id="notice" class="notice hidden" aria-live="polite"></section>
+
+    <section class="hero panel">
+      <div class="hero-copy">
+        <p class="eyebrow">Recorder + decoder + controlled write laboratory</p>
+        <h2>Read every mapped field and test exact FFF1 commands with readback verification.</h2>
+        <p>
+          The site subscribes to <code>FFF2</code>, decodes mapped G2/G4 fields, records G2 Ultra packets raw until they are mapped,
+          and exposes direct mode, zero-start, speed/power-curve, speed-config and factory-reset commands through <code>FFF1</code> behind one switch. Lights remain readable; the uploaded APK proved the old <code>F04C02xx</code> “light” guess was actually zero-start.
+        </p>
+      </div>
+
+      <div class="model-box">
+        <div>
+          <span class="field-label">Vehicle under test</span>
+          <small id="modelHelp">G4 decoding is enabled. The model is stamped into every exported row.</small>
+        </div>
+        <div class="segmented" role="radiogroup" aria-label="Scooter model">
+          <button type="button" class="segment" data-model="G2" aria-pressed="false">G2</button>
+          <button type="button" class="segment" data-model="G2_ULTRA" aria-pressed="false">G2 Ultra</button>
+          <button type="button" class="segment active" data-model="G4" aria-pressed="true">G4</button>
+        </div>
+      </div>
+
+      <div class="hero-buttons">
+        <button id="scanBtn" class="button primary large" type="button">Scan for G4</button>
+        <button id="reconnectBtn" class="button secondary large" type="button">Reconnect granted device</button>
+      </div>
+
+      <div class="protocol-bar">
+        <div><span>Service</span><strong>FFF0</strong></div>
+        <div><span>Notify</span><strong>FFF2</strong></div>
+        <div><span>Write</span><strong>FFF1</strong><small id="writePropertyLabel">not connected</small></div>
+        <div><span>Decoder</span><strong id="decoderLabel">G4 FFF2 shared v3</strong></div>
+      </div>
+    </section>
+
+    <section class="summary-grid">
+      <article class="summary-card"><span>Packets</span><strong id="packetCount">0</strong></article>
+      <article class="summary-card"><span>Recording</span><strong id="recordingState" class="muted-value">Stopped</strong></article>
+      <article class="summary-card"><span>Capture time</span><strong id="captureTime">00:00</strong></article>
+      <article class="summary-card"><span>Tests passed</span><strong id="passedCount">0 / 17</strong></article>
+      <article class="summary-card"><span>Device</span><strong id="deviceName">None</strong></article>
+    </section>
+
+    <nav class="tabs" aria-label="Validator sections">
+      <button class="tab active" type="button" data-tab="dashboard">Dashboard</button>
+      <button class="tab" type="button" data-tab="write">Write lab</button>
+      <button class="tab" type="button" data-tab="tests">Read tests</button>
+      <button class="tab" type="button" data-tab="log">Raw log</button>
+      <button class="tab" type="button" data-tab="offline">Offline CSV</button>
+      <button class="tab" type="button" data-tab="setup">Phone setup</button>
+    </nav>
+
+    <section id="dashboardTab" class="tab-page active">
+      <article id="g2Warning" class="panel warning-panel hidden">
+        <h2 id="modelWarningTitle">G2 shared-frame decoder</h2>
+        <p id="modelWarningText">Only fields independently observed in the G2 FFF2 log are decoded here. The old G2 Master FF55 protocol is completely separate.</p>
+      </article>
+
+      <div id="g4Dashboard" class="dashboard-layout">
+        <article class="panel speed-panel">
+          <div class="speed-ring">
+            <div><strong id="speedValue">0.0</strong><span>km/h</span><small id="speedRawValue" class="speed-raw-value">BLE raw —</small></div>
+          </div>
+          <div class="speed-meta">
+            <div><span>Peak</span><strong id="peakSpeed">0.0 km/h</strong></div>
+            <div><span>Integrated trip</span><strong id="integratedTrip">0.000 km</strong></div>
+            <div><span>Distance tick delta</span><strong id="distanceDelta">0.0 km</strong></div>
+          </div>
+          <p id="speedCalNote" class="speed-cal-note">G4 display calibration v2: BLE ÷16 remains the raw wheel-speed source. The main gauge is unchanged through 15 km/h, then applies the latest tester-derived correction: roughly 2 km/h correction near 20, ramping toward ~6 km/h at the top of the unloaded run. Raw BLE speed is always shown and exported.</p>
+        </article>
+
+        <article class="panel telemetry-panel">
+          <div class="panel-title"><div><p class="eyebrow">High confidence</p><h2>Mapped telemetry</h2></div><span class="confidence high">validated map</span></div>
+          <div class="telemetry-grid">
+            <div class="telemetry"><span>Ride mode</span><strong id="rideMode">—</strong><small id="modeProfile">—</small></div>
+            <div class="telemetry"><span>Battery</span><strong id="batteryPercent">—%</strong><small id="standardBattery">2A19: —</small></div>
+            <div class="telemetry"><span>Motor temperature</span><strong id="motorTemp">— °C</strong><small>Frame B 0..1 LE</small></div>
+            <div class="telemetry"><span>Current / load candidate</span><strong id="motorCurrent">— A</strong><small>Frame B 8..9 LE ÷100</small></div>
+            <div class="telemetry"><span>Lights</span><strong id="lightsState">—</strong><small>Frame A offset 17 bit 0</small></div>
+            <div class="telemetry"><span>Drive request</span><strong id="driveState">—</strong><small>Frame A offset 4 bit 1</small></div>
+            <div class="telemetry"><span>Brake input</span><strong id="brakeInput">—</strong><small>Frame A offset 4 bit 3</small></div>
+            <div class="telemetry"><span>Brake output mirror</span><strong id="brakeOutput">—</strong><small>Frame A offset 14 bit 3</small></div>
+          </div>
+        </article>
+
+        <article class="panel profile-panel">
+          <div class="panel-title"><div><p class="eyebrow">Mode profile</p><h2>Controller limits</h2></div></div>
+          <div class="profile-values">
+            <div><span>Current/torque profile candidate</span><strong id="modeCurrentLimit">—</strong><small id="profileExpectedCurrent">Observed 25 / 30 / 40</small></div>
+            <div><span>Speed profile raw</span><strong id="modeSpeedLimit">—</strong><small id="profileExpectedSpeed">Observed 20 / 40 / 99</small></div>
+            <div><span>Nominal voltage</span><strong id="nominalVoltage">—</strong><small id="profileExpectedVoltage">Observed 60 V</small></div>
+          </div>
+        </article>
+
+        <article class="panel unknown-panel">
+          <div class="panel-title"><div><p class="eyebrow">Still under investigation</p><h2>Unknown and lower-confidence fields</h2></div><span class="confidence medium">do not rename yet</span></div>
+          <div class="unknown-grid">
+            <div><span>Dynamic byte A8</span><strong id="unknown8">—</strong><small id="unknown8Range">range —</small></div>
+            <div><span>Possible ambient/controller temp A9</span><strong id="possibleTemp9">—</strong><small id="possibleTemp9Range">range —</small></div>
+            <div><span>Static flags A11</span><strong id="staticFlags11">—</strong></div>
+            <div><span>Possible fault word A12..13</span><strong id="faultWord">—</strong></div>
+            <div><span>Output flags A14</span><strong id="outputFlags">—</strong></div>
+            <div><span>Constants A15 / A16</span><strong id="constants1516">—</strong></div>
+          </div>
+        </article>
+
+        <article class="panel packet-panel">
+          <div class="panel-title"><div><p class="eyebrow">Packet health</p><h2>Frame families</h2></div></div>
+          <div class="packet-health">
+            <div><span>128-byte startup fills</span><strong id="startupCount">0</strong></div>
+            <div><span>20-byte Frame A</span><strong id="frameACount">0</strong></div>
+            <div><span>11-byte Frame B</span><strong id="frameBCount">0</strong></div>
+            <div><span>Unknown lengths</span><strong id="unknownFrameCount">0</strong></div>
+          </div>
+          <div class="last-packet"><span>Last FFF2 packet</span><code id="lastPacket">Waiting…</code></div>
+        </article>
+      </div>
+    </section>
+
+    <section id="testsTab" class="tab-page">
+      <article class="panel test-toolbar">
+        <div>
+          <p class="eyebrow">Guided physical validation</p>
+          <h2>Start a test, perform the action, and let the decoder judge the evidence.</h2>
+          <p id="testSuiteModelNote">Guided validation starts with the G4 profile map.</p>
+        </div>
+        <div class="toolbar-actions">
+          <button id="startAllBtn" class="button primary" type="button">Start test session</button>
+          <button id="resetTestsBtn" class="button danger-outline" type="button">Reset results</button>
+          <button id="exportReportBtn" class="button secondary" type="button">Export report</button>
+        </div>
+      </article>
+
+      <article id="activeTestPanel" class="panel active-test-panel">
+        <div>
+          <p class="eyebrow">Active instruction</p>
+          <h2 id="activeTestTitle">No test selected</h2>
+          <p id="activeTestInstruction">Choose Start on a test card. The site will add markers automatically.</p>
+        </div>
+        <div class="active-test-actions">
+          <button id="finishActiveTestBtn" class="button secondary" type="button" disabled>Finish active test</button>
+          <button id="skipActiveTestBtn" class="button ghost" type="button" disabled>Skip</button>
+        </div>
+      </article>
+
+      <div id="testGrid" class="test-grid"></div>
+    </section>
+
+    <section id="writeTab" class="tab-page">
+      <article class="panel write-intro-panel">
+        <div>
+          <p class="eyebrow">Direct FFF1 controls</p>
+          <h2>Mode, zero-start, speed/power curves, speed config, and recovery.</h2>
+          <p>Direct <code>F0</code> command frames. One write-enable switch; no phrase, timer, checklist, or passive-frame replay.</p>
+          <p class="write-correction-note"><strong>Correction from reset.apk:</strong> <code>F0 4C 02 00/01</code> belongs to <code>ControlPresenter.zeroStart</code>. The old light-write guess is removed; light state is still read from FFF2.</p>
+        </div>
+        <div class="write-status-grid simple-status-grid">
+          <div><span>FFF1</span><strong id="fff1Status">Unavailable</strong></div>
+          <div><span>Writes</span><strong id="writeGateStatus">Off</strong></div>
+          <div><span>Last write</span><strong id="lastWriteStatus">None</strong></div>
+        </div>
+      </article>
+
+      <article class="panel simple-write-panel">
+        <div class="simple-write-header">
+          <div>
+            <p class="eyebrow">Control switch</p>
+            <h2>Enable direct FFF1 writes</h2>
+            <p>Once enabled, the controls are writable immediately. Commands are sent once with no automatic retry. The red reset control is a <strong>FACTORY RESET</strong>.</p>
+          </div>
+          <label class="toggle-switch" for="writeEnableSwitch">
+            <input id="writeEnableSwitch" type="checkbox">
+            <span class="toggle-track" aria-hidden="true"><i></i></span>
+            <strong id="writeSwitchText">Writes off</strong>
+          </label>
+        </div>
+        <p id="commandAvailabilityNote" class="command-availability-note"></p>
+        <div id="commandGrid" class="simple-command-grid"></div>
+      </article>
+
+      <article class="panel simple-write-panel">
+        <div class="panel-title">
+          <div>
+            <p class="eyebrow">Manual transport lab</p>
+            <h2>Send raw FFF1 HEX once</h2>
+            <p id="rawWriteHelp">Manual transport test: enter raw hex for FFF1. It is sent exactly once and logged.</p>
+          </div>
+        </div>
+        <form id="rawWriteForm" class="custom-marker">
+          <input id="rawWriteHex" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="Hex bytes, e.g. F0 4C 03 01" disabled>
+          <button id="rawWriteBtn" class="button secondary" type="submit" disabled>Send once</button>
+        </form>
+      </article>
+
+      <article class="panel read-panel">
+        <div class="panel-title">
+          <div><p class="eyebrow">Explicit BLE reads</p><h2>Read every available characteristic now</h2></div>
+          <button id="readAllBtn" class="button primary" type="button" disabled>Read all</button>
+        </div>
+        <div class="read-actions">
+          <button id="readFFF2Btn" class="button secondary" type="button" disabled>Read FFF2</button>
+          <button id="readBatteryBtn" class="button secondary" type="button" disabled>Read 2A19 battery</button>
+          <button id="readDeviceInfoBtn" class="button secondary" type="button" disabled>Read device information</button>
+        </div>
+        <div class="device-info-grid">
+          <div><span>Manufacturer</span><strong id="manufacturerName">—</strong></div>
+          <div><span>Model</span><strong id="modelNumber">—</strong></div>
+          <div><span>Serial</span><strong id="serialNumber">—</strong></div>
+          <div><span>Hardware revision</span><strong id="hardwareRevision">—</strong></div>
+          <div><span>PnP ID</span><strong id="pnpId">—</strong></div>
+        </div>
+      </article>
+
+      <article class="panel write-history-panel">
+        <div class="panel-title"><div><p class="eyebrow">Write evidence</p><h2>Command and readback results</h2></div></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Time</th><th>Model</th><th>Command</th><th>TX</th><th>Expected readback</th><th>Result</th></tr></thead>
+            <tbody id="writeHistoryBody"><tr><td colspan="6" class="empty">No writes sent.</td></tr></tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+
+    <section id="logTab" class="tab-page">
+      <article class="panel recorder-panel">
+        <div>
+          <p class="eyebrow">Automatic CSV logging</p>
+          <h2 id="recordHeading">Waiting for connection</h2>
+          <p id="recordCopy">Logging begins when FFF2 notifications start and also records explicit reads and FFF1 writes.</p>
+        </div>
+        <div class="toolbar-actions">
+          <button id="recordToggleBtn" class="button danger" type="button" disabled>Stop recording</button>
+          <button id="clearCaptureBtn" class="button danger-outline" type="button">Clear</button>
+          <button id="exportCsvBtn" class="button secondary" type="button">Export CSV</button>
+          <button id="exportJsonBtn" class="button ghost" type="button">Export JSON</button>
+        </div>
+      </article>
+
+      <article class="panel marker-panel">
+        <div class="panel-title"><div><p class="eyebrow">Manual markers</p><h2>Tap before the action</h2></div></div>
+        <div class="marker-grid">
+          <button class="marker" type="button" data-marker="BASELINE">Baseline</button>
+          <button class="marker" type="button" data-marker="MODE 1">Mode 1</button>
+          <button class="marker" type="button" data-marker="MODE 2">Mode 2</button>
+          <button class="marker" type="button" data-marker="MODE 3">Mode 3</button>
+          <button class="marker" type="button" data-marker="LIGHTS ON">Lights on</button>
+          <button class="marker" type="button" data-marker="LIGHTS OFF">Lights off</button>
+          <button class="marker" type="button" data-marker="BRAKE ON">Brake on</button>
+          <button class="marker" type="button" data-marker="BRAKE OFF">Brake off</button>
+          <button class="marker" type="button" data-marker="THROTTLE START">Throttle start</button>
+          <button class="marker" type="button" data-marker="THROTTLE STOP">Throttle stop</button>
+          <button class="marker" type="button" data-marker="RIDE START">Ride start</button>
+          <button class="marker" type="button" data-marker="RIDE END">Ride end</button>
+        </div>
+        <form id="customMarkerForm" class="custom-marker">
+          <input id="customMarker" type="text" maxlength="90" placeholder="Custom marker, e.g. DISPLAY SPEED 20">
+          <button class="button ghost" type="submit">Add</button>
+        </form>
+      </article>
+
+      <article class="panel log-panel">
+        <div class="log-toolbar">
+          <div><p class="eyebrow">Live stream</p><h2>BLE traffic: RX, reads and TX</h2></div>
+          <label class="check"><input id="autoScroll" type="checkbox" checked> Auto-scroll</label>
+        </div>
+        <div class="table-wrap" id="logWrap">
+          <table>
+            <thead><tr><th>#</th><th>Time</th><th>Model</th><th>Direction</th><th>Source</th><th>Family / operation</th><th>Hex / marker</th></tr></thead>
+            <tbody id="logBody"><tr><td colspan="7" class="empty">No capture yet.</td></tr></tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+
+    <section id="offlineTab" class="tab-page">
+      <article class="panel offline-panel">
+        <div>
+          <p class="eyebrow">Offline validation</p>
+          <h2>Load an exported CSV on any phone or computer.</h2>
+          <p>The file is processed locally in the browser. Nothing is uploaded.</p>
+        </div>
+        <label class="button secondary file-button">Load CSV<input id="offlineFile" type="file" accept=".csv,text/csv"></label>
+      </article>
+      <article class="panel">
+        <div class="panel-title"><div><p class="eyebrow">Loaded file</p><h2 id="offlineTitle">No CSV loaded</h2></div></div>
+        <div id="offlineSummary" class="offline-summary"><p>Choose a G2, G2 Ultra or G4 CSV. G2 Ultra captures stay raw until its packet map is established.</p></div>
+      </article>
+    </section>
+
+    <section id="setupTab" class="tab-page">
+      <article class="panel setup-panel">
+        <h2>Phone setup</h2>
+        <ol>
+          <li>Open the deployed Vercel URL in Safari on the iPhone beside the scooter.</li>
+          <li>Install and enable the Beacio Safari extension, then reload the page.</li>
+          <li>Use the normal Safari tab. Do not launch it from a Home Screen shortcut.</li>
+          <li>Select the correct model before connecting. G2 Ultra uses verified FFF0/FFF1/FFF2 transport with raw FFF2 capture; G2 keeps its independently observed shared map; old G2 Master FF55 data is never mixed in.</li>
+          <li>Press Scan and select the scooter. G2 Ultra scanning intentionally shows all nearby BLE devices so it still works when FFF0 exists in GATT but is not advertised; pick the scooter, then the site verifies FFF0 and opens FFF2/FFF1.</li>
+          <li>Keep both wheels safely clear of the ground for throttle or speed tests.</li>
+        </ol>
+        <div class="safety-box">
+          <strong>Write boundary</strong>
+          <p>FFF1 writes use one simple enable switch and every TX is logged. Existing G2/G4 presets are sent once with no automatic retry. In G2 Ultra mode those presets are disabled because its command payloads are not verified; the manual HEX sender exists only for captured/known payloads. The site never writes to the separate <code>f000ffc0-0451-4000-b000-000000000000</code> service.</p>
+        </div>
+      </article>
+    </section>
+
+    <footer>
+      <span>G2/G4 decoder + G2 Ultra raw FFF2/FFF1 transport lab</span>
+      <span>Local-only capture · no accounts · no cloud upload</span>
+    </footer>
+  </main>
+</body>
+</html>
